@@ -1,6 +1,7 @@
 package edu.upc.epsevg.prop.oust;
 
 import edu.upc.epsevg.prop.oust.players.HumanPlayer;
+import edu.upc.epsevg.prop.oust.players.PropPlayer;
 import edu.upc.epsevg.prop.oust.players.RandomPlayer;
 //import edu.upc.epsevg.prop.oust.players.H_E_X_Player;
 
@@ -34,14 +35,14 @@ public class Game {
                 // Deixem el tontet en mans d'una mala persona
                 //---------------------------------------------
                 //IPlayer player1 = new RandomPlayer("Asterix");
-                //IPlayer player2 = new MalaOustiaPlayer();
+                IPlayer player2 = new MalaOustiaPlayer();
                 
                 
                 //---------------------------------------------
                 // Enjoy!
                 //---------------------------------------------
-                IPlayer player1 = new RandomPlayer("Obelix");
-                IPlayer player2 = new HumanPlayer("Human2");
+                IPlayer player1 = new PropPlayer("Obelix", 4);
+                //IPlayer player2 = new RandomPlayer("Asterix");
                                 
                 
                 //---------------------------------------------
