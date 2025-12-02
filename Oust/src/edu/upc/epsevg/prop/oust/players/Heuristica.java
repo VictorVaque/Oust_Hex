@@ -3,73 +3,76 @@ package edu.upc.epsevg.prop.oust.players;
 import edu.upc.epsevg.prop.oust.GameStatus;
 import edu.upc.epsevg.prop.oust.PlayerType;
 import java.awt.Point;
-import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 /**
- * Clase que implementa la función heurística para evaluar estados del juego Oust
- * Basada en el análisis de patrones hexagonales específicos
+ * Heurística simple y directa para Oust
+ * Se enfoca en: capturas posibles, amenazas, y balance de piezas
  */
 public class Heuristica {
     
-    // VALORES CONSTANTES PARA DIFERENTES PATRONES
-    private static final int VALOR_4_EN_LINEA = 10000;
-    private static final int VALOR_3_EN_LINEA = 1000;
-    private static final int VALOR_2_EN_LINEA = 100;
-    private static final int VALOR_1_EN_LINEA = 10;
+    // PESOS (ajustables)
+    private static final int PESO_PIEZA = 10;              // Valor por cada pieza propia
+    private static final int PESO_CAPTURA = 100;           // Bonus por poder capturar
+    private static final int PESO_AMENAZA = -150;          // Penalización por estar amenazado
+    private static final int PESO_GRUPO_GRANDE = 20;       // Bonus por grupos grandes
     
-    private static final int VALOR_BLOQUEO_3 = 30000;
-    private static final int VALOR_BLOQUEO_2 = 500;
-    
-    private static final int VALOR_CENTRO = 5;
-    private static final int VALOR_ESQUINA = 2;
-    
-    // Patrones de direcciones en un tablero hexagonal
+    // Direcciones hexagonales
     private static final int[][] DIRECTIONS = {
-        {0, 1},   // Derecha
-        {1, 0},   // Abajo-derecha
-        {1, -1},  // Abajo-izquierda
-        {0, -1},  // Izquierda
-        {-1, 0},  // Arriba-izquierda
-        {-1, 1}   // Arriba-derecha
+        {0, 1}, {1, 0}, {1, 1}, {0, -1}, {-1, 0}, {-1, -1}
     };
     
     /**
-     * Evalúa un estado del juego desde la perspectiva del jugador maximizador
+     * Evalúa un estado del juego
      */
     public static int eval(GameStatus state, PlayerType maximizingPlayer) {
-        PlayerType opponent = (maximizingPlayer == PlayerType.PLAYER1) ? 
-                             PlayerType.PLAYER2 : PlayerType.PLAYER1;
+        PlayerType opponent = (maximizingPlayer == PlayerType.PLAYER1) 
+            ? PlayerType.PLAYER2 : PlayerType.PLAYER1;
         
         int score = 0;
         
-        // 1. Análisis de patrones lineales en todas las direcciones
-        score += analizarPatronesLineales(state, maximizingPlayer, opponent);
+        // 1. Balance básico de piezas
+        int misPiezas = contarPiezas(state, maximizingPlayer);
+        int piezasRival = contarPiezas(state, opponent);
+        score += (misPiezas - piezasRival) * PESO_PIEZA;
         
-        // 2. Valoración posicional del tablero
-        score += analizarValorPosicional(state, maximizingPlayer, opponent);
+        // 2. Analizar grupos y amenazas
+        List<Grupo> misGrupos = obtenerGrupos(state, maximizingPlayer);
+        List<Grupo> gruposRival = obtenerGrupos(state, opponent);
         
-        // 3. Movilidad y potencial de captura
-        score += analizarMovilidad(state, maximizingPlayer, opponent);
+        // Valor por tamaño de grupos (grupos grandes son mejores)
+        for (Grupo g : misGrupos) {
+            score += g.tamano * PESO_GRUPO_GRANDE;
+        }
+        for (Grupo g : gruposRival) {
+            score -= g.tamano * PESO_GRUPO_GRANDE;
+        }
+        
+        // 3. Detectar amenazas y oportunidades de captura
+        score += analizarAmenazas(misGrupos, gruposRival);
         
         return score;
     }
     
     /**
-     * Analiza patrones lineales en las 6 direcciones hexagonales
+     * Analiza amenazas: grupos en contacto donde uno puede capturar al otro
      */
-    private static int analizarPatronesLineales(GameStatus state, PlayerType maximizingPlayer, PlayerType opponent) {
+    private static int analizarAmenazas(List<Grupo> misGrupos, List<Grupo> gruposRival) {
         int score = 0;
-        int size = state.getSize();
         
-        // Analizar cada casilla como punto de inicio de patrones
-        for (int i = 0; i < size * 2 - 1; i++) {
-            for (int j = 0; j < size * 2 - 1; j++) {
-                Point p = new Point(i, j);
-                if (state.isInBounds(p)) {
-                    // Analizar en las 6 direcciones hexagonales
-                    for (int[] dir : DIRECTIONS) {
-                        score += evaluarPatronEnDireccion(state, p, dir, maximizingPlayer, opponent);
+        for (Grupo mio : misGrupos) {
+            for (Grupo rival : gruposRival) {
+                if (estanEnContacto(mio, rival)) {
+                    int diferencia = mio.tamano - rival.tamano;
+                    
+                    if (diferencia > 0) {
+                        // Puedo capturar este grupo rival
+                        score += rival.tamano * PESO_CAPTURA;
+                    } else if (diferencia < 0) {
+                        // El rival puede capturarme
+                        score += mio.tamano * PESO_AMENAZA; // PESO_AMENAZA es negativo
                     }
                 }
             }
@@ -79,218 +82,82 @@ public class Heuristica {
     }
     
     /**
-     * Evalúa un patrón lineal en una dirección específica
+     * Verifica si dos grupos están en contacto (son adyacentes)
      */
-    private static int evaluarPatronEnDireccion(GameStatus state, Point start, int[] direction, 
-                                               PlayerType maximizingPlayer, PlayerType opponent) {
-        int score = 0;
-        
-        // Analizar ventanas de 4 casillas (como en Conecta 4)
-        for (int length = 4; length >= 2; length--) {
-            List<Point> ventana = obtenerVentana(state, start, direction, length);
-            if (ventana != null) {
-                int valorVentana = evaluarVentana(state, ventana, maximizingPlayer, opponent);
-                score += valorVentana;
+    private static boolean estanEnContacto(Grupo g1, Grupo g2) {
+        for (Point p1 : g1.puntos) {
+            for (int[] dir : DIRECTIONS) {
+                Point vecino = new Point(p1.x + dir[0], p1.y + dir[1]);
+                if (g2.puntos.contains(vecino)) {
+                    return true;
+                }
             }
         }
-        
-        return score;
+        return false;
     }
     
     /**
-     * Obtiene una ventana de casillas en una dirección
+     * Cuenta piezas totales de un jugador
      */
-    private static List<Point> obtenerVentana(GameStatus state, Point start, int[] direction, int length) {
-        List<Point> ventana = new ArrayList<>();
+    private static int contarPiezas(GameStatus state, PlayerType player) {
+        int count = 0;
+        int size = state.getSquareSize();
         
-        for (int i = 0; i < length; i++) {
-            int x = start.x + i * direction[0];
-            int y = start.y + i * direction[1];
-            Point p = new Point(x, y);
-            
-            if (!state.isInBounds(p)) {
-                return null; // Ventana incompleta
-            }
-            ventana.add(p);
-        }
-        
-        return ventana;
-    }
-    
-    /**
-     * Evalúa una ventana específica de casillas
-     */
-    private static int evaluarVentana(GameStatus state, List<Point> ventana, 
-                                     PlayerType maximizingPlayer, PlayerType opponent) {
-        int fichasPropias = 0;
-        int fichasRival = 0;
-        int vacios = 0;
-        
-        // Contar fichas en la ventana
-        for (Point p : ventana) {
-            PlayerType color = state.getColor(p);
-            if (color == maximizingPlayer) {
-                fichasPropias++;
-            } else if (color == opponent) {
-                fichasRival++;
-            } else {
-                vacios++;
-            }
-        }
-        
-        // Ventana bloqueada (ambos jugadores tienen fichas)
-        if (fichasPropias > 0 && fichasRival > 0) {
-            return 0;
-        }
-        
-        int valor = 0;
-        
-        // Evaluar ventanas propias
-        if (fichasPropias > 0) {
-            switch (fichasPropias) {
-                case 1:
-                    valor = VALOR_1_EN_LINEA;
-                    break;
-                case 2:
-                    valor = VALOR_2_EN_LINEA;
-                    break;
-                case 3:
-                    valor = VALOR_3_EN_LINEA;
-                    break;
-                case 4:
-                    valor = VALOR_4_EN_LINEA;
-                    break;
-            }
-            
-            // Bonus por vacíos jugables (potencial de completar)
-            if (vacios > 0) {
-                valor *= (1 + vacios);
-            }
-        }
-        // Evaluar ventanas rivales (bloqueos)
-        else if (fichasRival > 0) {
-            switch (fichasRival) {
-                case 2:
-                    valor = -VALOR_BLOQUEO_2;
-                    break;
-                case 3:
-                    valor = -VALOR_BLOQUEO_3;
-                    break;
-                case 4:
-                    valor = -VALOR_4_EN_LINEA; // ¡Peligro!
-                    break;
-            }
-            
-            // Las amenazas con vacíos son más peligrosas
-            if (vacios > 0) {
-                valor *= (1 + vacios);
-            }
-        }
-        
-        return valor;
-    }
-    
-    /**
-     * Analiza el valor posicional de las casillas
-     */
-    private static int analizarValorPosicional(GameStatus state, PlayerType maximizingPlayer, PlayerType opponent) {
-        int score = 0;
-        int size = state.getSize();
-        int centro = size - 1;
-        
-        for (int i = 0; i < size * 2 - 1; i++) {
-            for (int j = 0; j < size * 2 - 1; j++) {
+        for (int i = 0; i < size; i++) {
+            for (int j = 0; j < size; j++) {
                 Point p = new Point(i, j);
-                if (state.isInBounds(p)) {
-                    int valorCasilla = calcularValorCasilla(state, p, centro, maximizingPlayer, opponent);
-                    score += valorCasilla;
+                if (state.isInBounds(p) && state.getColor(p) == player) {
+                    count++;
+                }
+            }
+        }
+        return count;
+    }
+    
+    /**
+     * Obtiene todos los grupos de un jugador
+     */
+    private static List<Grupo> obtenerGrupos(GameStatus state, PlayerType player) {
+        List<Grupo> grupos = new java.util.ArrayList<>();
+        boolean[][] visitado = new boolean[state.getSquareSize()][state.getSquareSize()];
+        
+        for (int i = 0; i < state.getSquareSize(); i++) {
+            for (int j = 0; j < state.getSquareSize(); j++) {
+                Point p = new Point(i, j);
+                if (state.isInBounds(p) && !visitado[i][j] && state.getColor(p) == player) {
+                    Grupo grupo = new Grupo();
+                    dfs(state, p, player, visitado, grupo);
+                    grupos.add(grupo);
                 }
             }
         }
         
-        return score;
+        return grupos;
     }
     
     /**
-     * Calcula el valor de una casilla específica basado en su posición
+     * DFS para construir un grupo
      */
-    private static int calcularValorCasilla(GameStatus state, Point p, int centro, 
-                                           PlayerType maximizingPlayer, PlayerType opponent) {
-        int valor = 0;
-        PlayerType color = state.getColor(p);
-        
-        if (color == null) {
-            return 0; // Casilla vacía
+    private static void dfs(GameStatus state, Point p, PlayerType player, boolean[][] visitado, Grupo grupo) {
+        if (!state.isInBounds(p) || visitado[p.x][p.y] || state.getColor(p) != player) {
+            return;
         }
         
-        // Calcular distancia al centro
-        double distancia = Math.sqrt(Math.pow(p.x - centro, 2) + Math.pow(p.y - centro, 2));
+        visitado[p.x][p.y] = true;
+        grupo.puntos.add(new Point(p.x, p.y));
+        grupo.tamano++;
         
-        // Valor base por posición
-        if (distancia < 2) {
-            valor = VALOR_CENTRO; // Centro del tablero
-        } else if (distancia > centro) {
-            valor = VALOR_ESQUINA; // Esquinas
-        } else {
-            valor = 1; // Posición normal
-        }
-        
-        // Aplicar el valor según el jugador
-        if (color == maximizingPlayer) {
-            return valor;
-        } else {
-            return -valor;
-        }
-    }
-    
-    /**
-     * Analiza la movilidad y potencial de captura
-     */
-    private static int analizarMovilidad(GameStatus state, PlayerType maximizingPlayer, PlayerType opponent) {
-        int score = 0;
-        
-        // Movilidad actual
-        List<Point> misMovimientos = state.getMoves();
-        int miMovilidad = misMovimientos.size();
-        
-        // Estimación de movilidad del oponente
-        int movilidadOponente = 0;
-        if (state.getCurrentPlayer() == opponent) {
-            movilidadOponente = state.getMoves().size();
-        }
-        
-        // Diferencia de movilidad
-        score += (miMovilidad - movilidadOponente) * 5;
-        
-        // Potencial de captura - analizar movimientos que crean grupos grandes
-        for (Point movimiento : misMovimientos) {
-            GameStatus estadoTemp = new GameStatus(state);
-            estadoTemp.placeStone(movimiento);
-            
-            // Valorar movimientos que crean grupos de 3 o más
-            int tamanoGrupo = calcularTamanoGrupo(estadoTemp, movimiento, maximizingPlayer);
-            if (tamanoGrupo >= 3) {
-                score += tamanoGrupo * 10;
-            }
-        }
-        
-        return score;
-    }
-    
-    /**
-     * Calcula el tamaño del grupo después de un movimiento
-     */
-    private static int calcularTamanoGrupo(GameStatus state, Point movimiento, PlayerType player) {
-        int tamano = 1; // Al menos la pieza colocada
-        
-        // Verificar piezas conectadas en las 6 direcciones
         for (int[] dir : DIRECTIONS) {
-            Point vecino = new Point(movimiento.x + dir[0], movimiento.y + dir[1]);
-            if (state.isInBounds(vecino) && state.getColor(vecino) == player) {
-                tamano++;
-            }
+            Point vecino = new Point(p.x + dir[0], p.y + dir[1]);
+            dfs(state, vecino, player, visitado, grupo);
         }
-        
-        return tamano;
+    }
+    
+    /**
+     * Clase para representar un grupo de piedras conectadas
+     */
+    private static class Grupo {
+        Set<Point> puntos = new HashSet<>();
+        int tamano = 0;
     }
 }

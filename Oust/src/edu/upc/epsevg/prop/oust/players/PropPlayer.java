@@ -11,7 +11,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Jugador de Oust usando algoritmo Minimax con poda Alpha-Beta
+ * Jugador de Oust usando Minimax con poda Alpha-Beta
  */
 public class PropPlayer implements IPlayer, IAuto {
     
@@ -19,195 +19,218 @@ public class PropPlayer implements IPlayer, IAuto {
     private final int MAX_DEPTH;
     private boolean timeout;
     private int nodesVisited;
-    private int nodesPruned;
     
     public PropPlayer(String name, int depth) {
         this.name = name;
         this.MAX_DEPTH = depth;
-        this.timeout = false;
-        this.nodesVisited = 0;
-        this.nodesPruned = 0;
     }
     
     @Override
     public PlayerMove move(GameStatus s) {
         timeout = false;
         nodesVisited = 0;
-        nodesPruned = 0;
         
-        PlayerType currentPlayer = s.getCurrentPlayer();
-        List<Point> possibleFirstMoves = s.getMoves();
+        List<Point> possibleMoves = s.getMoves();
         
-        // Si no hay movimientos posibles, pasar turno
-        if (possibleFirstMoves.isEmpty()) {
+        // Sin movimientos → pasar
+        if (possibleMoves.isEmpty()) {
             return new PlayerMove(null, nodesVisited, MAX_DEPTH, SearchType.MINIMAX);
         }
         
-        // Si solo hay un movimiento posible, tomarlo directamente
-        if (possibleFirstMoves.size() == 1) {
-            List<Point> path = generateCompletePath(s, possibleFirstMoves.get(0));
-            return new PlayerMove(path, nodesVisited, MAX_DEPTH, SearchType.MINIMAX);
-        }
-        
-        // Buscar el mejor movimiento inicial usando Minimax
+        PlayerType currentPlayer = s.getCurrentPlayer();
         int bestValue = Integer.MIN_VALUE;
-        Point bestFirstMove = possibleFirstMoves.get(0);
+        List<Point> bestPath = null;
         int alpha = Integer.MIN_VALUE;
         int beta = Integer.MAX_VALUE;
         
-        System.out.println("=== EVALUANDO " + possibleFirstMoves.size() + " MOVIMIENTOS INICIALES ===");
-        
-        for (Point firstMove : possibleFirstMoves) {
+        // Evaluar cada movimiento inicial
+        for (Point firstMove : possibleMoves) {
             if (timeout) break;
             
-            // Crear una copia para simular
-            GameStatus newState = new GameStatus(s);
+            // Evaluar este movimiento construyendo el path óptimo
+            PathEvaluation eval = evaluarMovimiento(s, firstMove, currentPlayer, 0, alpha, beta);
             
-            // Simular solo el primer movimiento y evaluar el estado resultante
-            newState.placeStone(firstMove);
-            
-            // Evaluar el estado después del primer movimiento
-            int value = minValue(newState, 1, alpha, beta, currentPlayer);
-            System.out.println("Movimiento inicial " + firstMove + " = " + value);
-            
-            if (value > bestValue) {
-                bestValue = value;
-                bestFirstMove = firstMove;
+            if (eval.valor > bestValue) {
+                bestValue = eval.valor;
+                bestPath = eval.path;
             }
+            
             alpha = Math.max(alpha, bestValue);
+            if (bestValue >= beta) break;
         }
         
-        System.out.println("MEJOR MOVIMIENTO INICIAL: " + bestFirstMove + " con valor " + bestValue);
-        System.out.println("Nodos visitados: " + nodesVisited);
-        System.out.println("Nodos podados: " + nodesPruned);
-        
-        // Generar el path completo para el mejor movimiento inicial
-        List<Point> completePath = generateCompletePath(s, bestFirstMove);
-        System.out.println("Path completo: " + completePath);
-        System.out.println("========================");
-        
-        return new PlayerMove(completePath, nodesVisited, MAX_DEPTH, SearchType.MINIMAX);
+        return new PlayerMove(bestPath, nodesVisited, MAX_DEPTH, SearchType.MINIMAX);
     }
     
     /**
-     * Genera el path completo para un movimiento inicial (igual que RandomPlayer)
+     * Evalúa un movimiento y construye el mejor path desde ese punto
+     * Explora TODAS las opciones cuando hay capturas encadenadas
      */
-    private List<Point> generateCompletePath(GameStatus state, Point firstMove) {
+    private PathEvaluation evaluarMovimiento(GameStatus state, Point move, PlayerType player, 
+                                            int depth, int alpha, int beta) {
+        GameStatus newState = new GameStatus(state);
         List<Point> path = new ArrayList<>();
-        PlayerType currentPlayer = state.getCurrentPlayer();
-        GameStatus aux = new GameStatus(state);
+        path.add(move);
+        newState.placeStone(move);
         
-        // Empezar con el primer movimiento
-        aux.placeStone(firstMove);
-        path.add(firstMove);
-        
-        // Continuar mientras sea el turno del mismo jugador
-        while (currentPlayer == aux.getCurrentPlayer()) {
-            List<Point> moves = aux.getMoves();
-            if (moves.isEmpty()) break;
+        // Si sigue siendo nuestro turno (captura), debemos elegir continuación
+        if (player == newState.getCurrentPlayer() && !newState.isGameOver()) {
+            List<Point> continuaciones = newState.getMoves();
             
-            // Para el path, elegimos el primer movimiento disponible
-            // (En una versión más avanzada, podríamos elegir el mejor)
-            Point nextMove = moves.get(0);
-            aux.placeStone(nextMove);
-            path.add(nextMove);
+            if (!continuaciones.isEmpty()) {
+                // IMPORTANTE: Explorar TODAS las continuaciones y elegir la mejor
+                PathEvaluation mejorContinuacion = null;
+                int mejorValor = Integer.MIN_VALUE;
+                
+                for (Point cont : continuaciones) {
+                    PathEvaluation eval = evaluarMovimiento(newState, cont, player, depth + 1, alpha, beta);
+                    
+                    if (eval.valor > mejorValor) {
+                        mejorValor = eval.valor;
+                        mejorContinuacion = eval;
+                    }
+                }
+                
+                // Combinar paths
+                path.addAll(mejorContinuacion.path);
+                newState = mejorContinuacion.state;
+            }
         }
         
-        return path;
+        // Evaluar el estado final del path completo
+        int valor = minimax(newState, depth + 1, alpha, beta, player);
+        
+        return new PathEvaluation(path, valor, newState);
     }
     
-    private int maxValue(GameStatus state, int depth, int alpha, int beta, PlayerType maximizingPlayer) {
+    /**
+     * Algoritmo Minimax con poda Alpha-Beta
+     */
+    private int minimax(GameStatus state, int depth, int alpha, int beta, PlayerType maximizingPlayer) {
         nodesVisited++;
-
-        // PRIMERO verificar condiciones terminales
+        
+        // Condición terminal: juego terminado
         if (state.isGameOver()) {
             PlayerType winner = state.GetWinner();
             if (winner == maximizingPlayer) {
-                return 1000000 - depth; // Victoria más rápida = mejor
+                return 1000000 - depth;
             } else if (winner != null) {
-                return -1000000 + depth; // Derrota más tardía = menos peor  
+                return -1000000 + depth;
             }
-            return 0; // Empate
+            return 0;
         }
-
+        
+        // Condición terminal: profundidad máxima o timeout
         if (timeout || depth >= MAX_DEPTH) {
-            // Solo estados no terminales llegan aquí
             return Heuristica.eval(state, maximizingPlayer);
         }
-
-        int value = Integer.MIN_VALUE;
+        
+        PlayerType currentPlayer = state.getCurrentPlayer();
         List<Point> moves = state.getMoves();
-
-        for (Point move : moves) {
-            if (timeout) {
-                break;
-            }
-
-            GameStatus newState = new GameStatus(state);
-            newState.placeStone(move);
-
-            value = Math.max(value, minValue(newState, depth + 1, alpha, beta, maximizingPlayer));
-
-            if (value >= beta) {
-                nodesPruned++;
-                return value;
-            }
-            alpha = Math.max(alpha, value);
+        
+        // Sin movimientos → pasar turno
+        if (moves.isEmpty()) {
+            return minimax(state, depth + 1, alpha, beta, maximizingPlayer);
         }
-
-        return value;
+        
+        boolean maximizing = (currentPlayer == maximizingPlayer);
+        
+        if (maximizing) {
+            // Nodo MAX
+            int value = Integer.MIN_VALUE;
+            
+            for (Point move : moves) {
+                if (timeout) break;
+                
+                // Construir el path completo para este movimiento
+                GameStatus newState = completarJugadaOptima(state, move, currentPlayer);
+                
+                value = Math.max(value, minimax(newState, depth + 1, alpha, beta, maximizingPlayer));
+                
+                if (value >= beta) return value; // Poda beta
+                alpha = Math.max(alpha, value);
+            }
+            return value;
+            
+        } else {
+            // Nodo MIN
+            int value = Integer.MAX_VALUE;
+            
+            for (Point move : moves) {
+                if (timeout) break;
+                
+                // Construir el path completo para este movimiento
+                GameStatus newState = completarJugadaOptima(state, move, currentPlayer);
+                
+                value = Math.min(value, minimax(newState, depth + 1, alpha, beta, maximizingPlayer));
+                
+                if (value <= alpha) return value; // Poda alpha
+                beta = Math.min(beta, value);
+            }
+            return value;
+        }
     }
-
-    private int minValue(GameStatus state, int depth, int alpha, int beta, PlayerType maximizingPlayer) {
-        nodesVisited++;
-
-        // PRIMERO verificar condiciones terminales
-        if (state.isGameOver()) {
-            PlayerType winner = state.GetWinner();
-            if (winner == maximizingPlayer) {
-                return 1000000 - depth; // Victoria más rápida = mejor
-            } else if (winner != null) {
-                return -1000000 + depth; // Derrota más tardía = menos peor  
+    
+    /**
+     * Completa una jugada eligiendo las mejores continuaciones cuando hay capturas
+     */
+    private GameStatus completarJugadaOptima(GameStatus state, Point firstMove, PlayerType player) {
+        GameStatus newState = new GameStatus(state);
+        newState.placeStone(firstMove);
+        
+        // Mientras siga siendo nuestro turno, elegir mejor continuación
+        while (player == newState.getCurrentPlayer() && !newState.isGameOver()) {
+            List<Point> continuaciones = newState.getMoves();
+            if (continuaciones.isEmpty()) break;
+            
+            // Si solo hay una opción, tomarla
+            if (continuaciones.size() == 1) {
+                newState.placeStone(continuaciones.get(0));
+            } else {
+                // Evaluar cada continuación y elegir la mejor
+                Point mejorCont = continuaciones.get(0);
+                int mejorValor = Integer.MIN_VALUE;
+                
+                for (Point cont : continuaciones) {
+                    GameStatus temp = new GameStatus(newState);
+                    temp.placeStone(cont);
+                    int valor = Heuristica.eval(temp, player);
+                    
+                    if (valor > mejorValor) {
+                        mejorValor = valor;
+                        mejorCont = cont;
+                    }
+                }
+                
+                newState.placeStone(mejorCont);
             }
-            return 0; // Empate
         }
-
-        if (timeout || depth >= MAX_DEPTH) {
-            // Solo estados no terminales llegan aquí
-            return Heuristica.eval(state, maximizingPlayer);
-        }
-
-        int value = Integer.MAX_VALUE;
-        List<Point> moves = state.getMoves();
-
-        for (Point move : moves) {
-            if (timeout) {
-                break;
-            }
-
-            GameStatus newState = new GameStatus(state);
-            newState.placeStone(move);
-
-            value = Math.min(value, maxValue(newState, depth + 1, alpha, beta, maximizingPlayer));
-
-            if (value <= alpha) {
-                nodesPruned++;
-                return value;
-            }
-            beta = Math.min(beta, value);
-        }
-
-        return value;
+        
+        return newState;
     }
     
     @Override
     public void timeout() {
         timeout = true;
-        System.out.println("Timeout - Interrumpiendo búsqueda...");
     }
     
     @Override
     public String getName() {
-        return "MinimaxPlayer(" + name + ", depth:" + MAX_DEPTH + ")";
+        return "PropPlayer(" + name + ", d:" + MAX_DEPTH + ")";
+    }
+    
+    /**
+     * Clase auxiliar para almacenar evaluación de un path
+     */
+    private static class PathEvaluation {
+        List<Point> path;
+        int valor;
+        GameStatus state;
+        
+        PathEvaluation(List<Point> path, int valor, GameStatus state) {
+            this.path = path;
+            this.valor = valor;
+            this.state = state;
+        }
     }
 }

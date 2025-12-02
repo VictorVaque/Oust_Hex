@@ -34,14 +34,14 @@ public class Game {
                 //---------------------------------------------
                 // Deixem el tontet en mans d'una mala persona
                 //---------------------------------------------
-                //IPlayer player1 = new RandomPlayer("Asterix");
+                //IPlayer player1 = new HumanPlayer("Asterix");
                 IPlayer player2 = new MalaOustiaPlayer();
                 
                 
                 //---------------------------------------------
                 // Enjoy!
                 //---------------------------------------------
-                IPlayer player1 = new PropPlayer("Obelix", 4);
+                IPlayer player1 = new PropPlayer("Obelix", 2);
                 //IPlayer player2 = new RandomPlayer("Asterix");
                                 
                 
