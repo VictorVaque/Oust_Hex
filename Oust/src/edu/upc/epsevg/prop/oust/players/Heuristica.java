@@ -3,76 +3,68 @@ package edu.upc.epsevg.prop.oust.players;
 import edu.upc.epsevg.prop.oust.GameStatus;
 import edu.upc.epsevg.prop.oust.PlayerType;
 import java.awt.Point;
+import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
-/**
- * Heurística simple y directa para Oust
- * Se enfoca en: capturas posibles, amenazas, y balance de piezas
- */
+
 public class Heuristica {
     
-    // PESOS (ajustables)
-    private static final int PESO_PIEZA = 10;              // Valor por cada pieza propia
-    private static final int PESO_CAPTURA = 100;           // Bonus por poder capturar
-    private static final int PESO_AMENAZA = -150;          // Penalización por estar amenazado
-    private static final int PESO_GRUPO_GRANDE = 20;       // Bonus por grupos grandes
+    // PESOS
+    private static final int PESO_PIEZA = 10;
+    private static final int PESO_CAPTURA = 100;
+    private static final int PESO_AMENAZA = -150;
+    private static final int PESO_GRUPO = 20;
     
     // Direcciones hexagonales
-    private static final int[][] DIRECTIONS = {
+    private static final int[][] DIRS = {
         {0, 1}, {1, 0}, {1, 1}, {0, -1}, {-1, 0}, {-1, -1}
     };
     
-    /**
-     * Evalúa un estado del juego
-     */
-    public static int eval(GameStatus state, PlayerType maximizingPlayer) {
-        PlayerType opponent = (maximizingPlayer == PlayerType.PLAYER1) 
-            ? PlayerType.PLAYER2 : PlayerType.PLAYER1;
+    public static int eval(GameStatus state, PlayerType player) {
+        PlayerType opp = (player == PlayerType.PLAYER1) ? PlayerType.PLAYER2 : PlayerType.PLAYER1;
         
         int score = 0;
+        int size = state.getSquareSize();
+        boolean[][] visitado = new boolean[size][size];
+        List<Grupo> misGrupos = new ArrayList<>();
+        List<Grupo> gruposRival = new ArrayList<>();
         
-        // 1. Balance básico de piezas
-        int misPiezas = contarPiezas(state, maximizingPlayer);
-        int piezasRival = contarPiezas(state, opponent);
-        score += (misPiezas - piezasRival) * PESO_PIEZA;
-        
-        // 2. Analizar grupos y amenazas
-        List<Grupo> misGrupos = obtenerGrupos(state, maximizingPlayer);
-        List<Grupo> gruposRival = obtenerGrupos(state, opponent);
-        
-        // Valor por tamaño de grupos (grupos grandes son mejores)
-        for (Grupo g : misGrupos) {
-            score += g.tamano * PESO_GRUPO_GRANDE;
+        // Una sola pasada por el tablero
+        for (int i = 0; i < size; i++) {
+            for (int j = 0; j < size; j++) {
+                Point p = new Point(i, j);
+                if (!state.isInBounds(p) || visitado[i][j]) continue;
+                
+                PlayerType color = state.getColor(p);
+                if (color == null) continue;
+                
+                // Construir grupo
+                Grupo g = new Grupo();
+                dfs(state, p, color, visitado, g);
+                
+                if (color == player) {
+                    misGrupos.add(g);
+                    score += g.tamano * PESO_PIEZA;
+                    score += g.tamano * PESO_GRUPO;
+                } else {
+                    gruposRival.add(g);
+                    score -= g.tamano * PESO_PIEZA;
+                    score -= g.tamano * PESO_GRUPO;
+                }
+            }
         }
-        for (Grupo g : gruposRival) {
-            score -= g.tamano * PESO_GRUPO_GRANDE;
-        }
         
-        // 3. Detectar amenazas y oportunidades de captura
-        score += analizarAmenazas(misGrupos, gruposRival);
-        
-        return score;
-    }
-    
-    /**
-     * Analiza amenazas: grupos en contacto donde uno puede capturar al otro
-     */
-    private static int analizarAmenazas(List<Grupo> misGrupos, List<Grupo> gruposRival) {
-        int score = 0;
-        
+        // Analizar amenazas entre grupos en contacto
         for (Grupo mio : misGrupos) {
             for (Grupo rival : gruposRival) {
-                if (estanEnContacto(mio, rival)) {
-                    int diferencia = mio.tamano - rival.tamano;
-                    
-                    if (diferencia > 0) {
-                        // Puedo capturar este grupo rival
+                if (contacto(mio, rival)) {
+                    int dif = mio.tamano - rival.tamano;
+                    if (dif > 0) {
                         score += rival.tamano * PESO_CAPTURA;
-                    } else if (diferencia < 0) {
-                        // El rival puede capturarme
-                        score += mio.tamano * PESO_AMENAZA; // PESO_AMENAZA es negativo
+                    } else if (dif < 0) {
+                        score += mio.tamano * PESO_AMENAZA;
                     }
                 }
             }
@@ -81,14 +73,22 @@ public class Heuristica {
         return score;
     }
     
-    /**
-     * Verifica si dos grupos están en contacto (son adyacentes)
-     */
-    private static boolean estanEnContacto(Grupo g1, Grupo g2) {
-        for (Point p1 : g1.puntos) {
-            for (int[] dir : DIRECTIONS) {
-                Point vecino = new Point(p1.x + dir[0], p1.y + dir[1]);
-                if (g2.puntos.contains(vecino)) {
+    private static void dfs(GameStatus state, Point p, PlayerType color, boolean[][] vis, Grupo g) {
+        if (!state.isInBounds(p) || vis[p.x][p.y] || state.getColor(p) != color) return;
+        
+        vis[p.x][p.y] = true;
+        g.puntos.add(p);
+        g.tamano++;
+        
+        for (int[] d : DIRS) {
+            dfs(state, new Point(p.x + d[0], p.y + d[1]), color, vis, g);
+        }
+    }
+    
+    private static boolean contacto(Grupo g1, Grupo g2) {
+        for (Point p : g1.puntos) {
+            for (int[] d : DIRS) {
+                if (g2.puntos.contains(new Point(p.x + d[0], p.y + d[1]))) {
                     return true;
                 }
             }
@@ -96,66 +96,6 @@ public class Heuristica {
         return false;
     }
     
-    /**
-     * Cuenta piezas totales de un jugador
-     */
-    private static int contarPiezas(GameStatus state, PlayerType player) {
-        int count = 0;
-        int size = state.getSquareSize();
-        
-        for (int i = 0; i < size; i++) {
-            for (int j = 0; j < size; j++) {
-                Point p = new Point(i, j);
-                if (state.isInBounds(p) && state.getColor(p) == player) {
-                    count++;
-                }
-            }
-        }
-        return count;
-    }
-    
-    /**
-     * Obtiene todos los grupos de un jugador
-     */
-    private static List<Grupo> obtenerGrupos(GameStatus state, PlayerType player) {
-        List<Grupo> grupos = new java.util.ArrayList<>();
-        boolean[][] visitado = new boolean[state.getSquareSize()][state.getSquareSize()];
-        
-        for (int i = 0; i < state.getSquareSize(); i++) {
-            for (int j = 0; j < state.getSquareSize(); j++) {
-                Point p = new Point(i, j);
-                if (state.isInBounds(p) && !visitado[i][j] && state.getColor(p) == player) {
-                    Grupo grupo = new Grupo();
-                    dfs(state, p, player, visitado, grupo);
-                    grupos.add(grupo);
-                }
-            }
-        }
-        
-        return grupos;
-    }
-    
-    /**
-     * DFS para construir un grupo
-     */
-    private static void dfs(GameStatus state, Point p, PlayerType player, boolean[][] visitado, Grupo grupo) {
-        if (!state.isInBounds(p) || visitado[p.x][p.y] || state.getColor(p) != player) {
-            return;
-        }
-        
-        visitado[p.x][p.y] = true;
-        grupo.puntos.add(new Point(p.x, p.y));
-        grupo.tamano++;
-        
-        for (int[] dir : DIRECTIONS) {
-            Point vecino = new Point(p.x + dir[0], p.y + dir[1]);
-            dfs(state, vecino, player, visitado, grupo);
-        }
-    }
-    
-    /**
-     * Clase para representar un grupo de piedras conectadas
-     */
     private static class Grupo {
         Set<Point> puntos = new HashSet<>();
         int tamano = 0;

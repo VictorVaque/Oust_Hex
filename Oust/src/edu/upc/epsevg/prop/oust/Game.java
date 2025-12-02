@@ -42,7 +42,7 @@ public class Game {
                 // Enjoy!
                 //---------------------------------------------
                 IPlayer player1 = new PropPlayer("Obelix", 2);
-                //IPlayer player2 = new RandomPlayer("Asterix");
+                //IPlayer player2 = new HumanPlayer("Asterix");
                                 
                 
                 //---------------------------------------------
