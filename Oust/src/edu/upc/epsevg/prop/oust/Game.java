@@ -34,7 +34,7 @@ public class Game {
                 //---------------------------------------------
                 // Deixem el tontet en mans d'una mala persona
                 //---------------------------------------------
-                //IPlayer player1 = new HumanPlayer("Asterix");
+                //IPlayer player2 = new HumanPlayer("Asterix");
                 IPlayer player2 = new MalaOustiaPlayer();
                 
                 

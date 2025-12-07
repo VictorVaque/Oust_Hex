@@ -11,7 +11,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Jugador Minimax con Alpha-Beta para Oust
+ * Jugador Minimax simple y rápido
  */
 public class PropPlayer implements IPlayer, IAuto {
     
@@ -35,140 +35,110 @@ public class PropPlayer implements IPlayer, IAuto {
             return new PlayerMove(null, nodesVisited, MAX_DEPTH, SearchType.MINIMAX);
         }
         
-        PlayerType player = s.getCurrentPlayer();
+        PlayerType p = s.getCurrentPlayer();
         int best = Integer.MIN_VALUE;
         List<Point> bestPath = null;
-        int alpha = Integer.MIN_VALUE;
-        int beta = Integer.MAX_VALUE;
+        int a = Integer.MIN_VALUE;
+        int b = Integer.MAX_VALUE;
         
         for (Point m : moves) {
             if (timeout) break;
             
-            PathEval eval = evalPath(s, m, player, 0, alpha, beta);
+            GameStatus ns = new GameStatus(s);
+            List<Point> path = completarPath(ns, m, p);
+            int val = minimax(ns, 1, a, b, p);
             
-            if (eval.valor > best) {
-                best = eval.valor;
-                bestPath = eval.path;
+            if (val > best) {
+                best = val;
+                bestPath = path;
             }
             
-            alpha = Math.max(alpha, best);
-            if (best >= beta) break;
+            a = Math.max(a, best);
+            if (best >= b) break;
         }
         
         return new PlayerMove(bestPath, nodesVisited, MAX_DEPTH, SearchType.MINIMAX);
     }
     
     /**
-     * Evalúa un movimiento construyendo el mejor path posible
+     * Completa el path de una jugada
      */
-    private PathEval evalPath(GameStatus s, Point m, PlayerType p, int depth, int alpha, int beta) {
-        GameStatus ns = new GameStatus(s);
+    private List<Point> completarPath(GameStatus s, Point m, PlayerType p) {
         List<Point> path = new ArrayList<>();
         path.add(m);
-        ns.placeStone(m);
+        s.placeStone(m);
         
-        // Si hay capturas encadenadas, explorar todas las opciones
-        if (p == ns.getCurrentPlayer() && !ns.isGameOver()) {
-            List<Point> conts = ns.getMoves();
-            
-            if (!conts.isEmpty()) {
-                PathEval mejor = null;
-                int mejorVal = Integer.MIN_VALUE;
-                
-                for (Point c : conts) {
-                    PathEval e = evalPath(ns, c, p, depth + 1, alpha, beta);
-                    if (e.valor > mejorVal) {
-                        mejorVal = e.valor;
-                        mejor = e;
-                    }
-                }
-                
-                path.addAll(mejor.path);
-                ns = mejor.state;
-            }
-        }
-        
-        int valor = minimax(ns, depth + 1, alpha, beta, p);
-        return new PathEval(path, valor, ns);
-    }
-    
-    /**
-     * Minimax con Alpha-Beta
-     */
-    private int minimax(GameStatus s, int depth, int alpha, int beta, PlayerType maxP) {
-        nodesVisited++;
-        
-        if (s.isGameOver()) {
-            PlayerType w = s.GetWinner();
-            if (w == maxP) return 1000000 - depth;
-            if (w != null) return -1000000 + depth;
-            return 0;
-        }
-        
-        if (timeout || depth >= MAX_DEPTH) {
-            return Heuristica.eval(s, maxP);
-        }
-        
-        List<Point> moves = s.getMoves();
-        if (moves.isEmpty()) {
-            return minimax(s, depth + 1, alpha, beta, maxP);
-        }
-        
-        PlayerType curr = s.getCurrentPlayer();
-        boolean max = (curr == maxP);
-        int val = max ? Integer.MIN_VALUE : Integer.MAX_VALUE;
-        
-        for (Point m : moves) {
-            if (timeout) break;
-            
-            GameStatus ns = completar(s, m, curr);
-            int v = minimax(ns, depth + 1, alpha, beta, maxP);
-            
-            if (max) {
-                val = Math.max(val, v);
-                if (val >= beta) return val;
-                alpha = Math.max(alpha, val);
-            } else {
-                val = Math.min(val, v);
-                if (val <= alpha) return val;
-                beta = Math.min(beta, val);
-            }
-        }
-        
-        return val;
-    }
-    
-    /**
-     * Completa una jugada con capturas encadenadas
-     */
-    private GameStatus completar(GameStatus s, Point m, PlayerType p) {
-        GameStatus ns = new GameStatus(s);
-        ns.placeStone(m);
-        
-        while (p == ns.getCurrentPlayer() && !ns.isGameOver()) {
-            List<Point> conts = ns.getMoves();
+        while (p == s.getCurrentPlayer() && !s.isGameOver()) {
+            List<Point> conts = s.getMoves();
             if (conts.isEmpty()) break;
             
-            if (conts.size() == 1) {
-                ns.placeStone(conts.get(0));
-            } else {
-                Point mejor = conts.get(0);
+            Point mejor = conts.get(0);
+            
+            // Si hay múltiples opciones, elegir la que da mejor heurística
+            if (conts.size() > 1) {
                 int mejorV = Integer.MIN_VALUE;
-                
                 for (Point c : conts) {
-                    GameStatus tmp = new GameStatus(ns);
-                    tmp.placeStone(c);
-                    int v = Heuristica.eval(tmp, p);
+                    GameStatus temp = new GameStatus(s);
+                    temp.placeStone(c);
+                    int v = Heuristica.eval(temp, p);
                     if (v > mejorV) {
                         mejorV = v;
                         mejor = c;
                     }
                 }
-                ns.placeStone(mejor);
+            }
+            
+            path.add(mejor);
+            s.placeStone(mejor);
+        }
+        
+        return path;
+    }
+    
+    /**
+     * Minimax
+     */
+    private int minimax(GameStatus s, int d, int a, int b, PlayerType maxP) {
+        nodesVisited++;
+        
+        if (s.isGameOver()) {
+            PlayerType w = s.GetWinner();
+            if (w == maxP) return 1000000 - d;
+            if (w != null) return -1000000 + d;
+            return 0;
+        }
+        
+        if (timeout || d >= MAX_DEPTH) {
+            return Heuristica.eval(s, maxP);
+        }
+        
+        List<Point> moves = s.getMoves();
+        if (moves.isEmpty()) {
+            return minimax(s, d + 1, a, b, maxP);
+        }
+        
+        boolean max = (s.getCurrentPlayer() == maxP);
+        int val = max ? Integer.MIN_VALUE : Integer.MAX_VALUE;
+        
+        for (Point m : moves) {
+            if (timeout) break;
+            
+            GameStatus ns = new GameStatus(s);
+            completarPath(ns, m, s.getCurrentPlayer());
+            int v = minimax(ns, d + 1, a, b, maxP);
+            
+            if (max) {
+                val = Math.max(val, v);
+                if (val >= b) return val;
+                a = Math.max(a, val);
+            } else {
+                val = Math.min(val, v);
+                if (val <= a) return val;
+                b = Math.min(b, val);
             }
         }
         
-        return ns;
+        return val;
     }
     
     @Override
@@ -179,17 +149,5 @@ public class PropPlayer implements IPlayer, IAuto {
     @Override
     public String getName() {
         return "PropPlayer(" + name + ")";
-    }
-    
-    private static class PathEval {
-        List<Point> path;
-        int valor;
-        GameStatus state;
-        
-        PathEval(List<Point> p, int v, GameStatus s) {
-            this.path = p;
-            this.valor = v;
-            this.state = s;
-        }
     }
 }
